@@ -3,15 +3,15 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 import bufio from 'bufio'
 import { Assert } from '../../../assert'
-import { getBlockSize, writeBlock } from '../../../network/utils/block'
-import { makeBlockAfter } from '../../../testUtilities/helpers/blockchain'
+import { getBlockSize, readBlock, writeBlock } from '../../../network/utils/block'
+import { useMinerBlockFixture } from '../../../testUtilities'
 import { createRouteTest } from '../../../testUtilities/routeTest'
 import { SnapshotChainStreamResponse } from './snapshotChain'
 
 describe('Route chain/snapshotChainStream', () => {
   const routeTest = createRouteTest()
 
-  it('correctly a block buffer', async () => {
+  it('correctly returns a block buffer', async () => {
     const { chain, strategy } = routeTest
     await chain.open()
     strategy.disableMiningReward()
@@ -19,8 +19,9 @@ describe('Route chain/snapshotChainStream', () => {
     const genesis = await chain.getBlock(chain.genesis)
     Assert.isNotNull(genesis)
 
-    const blockA1 = await makeBlockAfter(chain, genesis)
+    const blockA1 = await useMinerBlockFixture(chain, 2)
     await expect(chain).toAddBlock(blockA1)
+    expect(blockA1.transactions.length).toBe(1)
 
     const response = await routeTest.client
       .request<SnapshotChainStreamResponse>('chain/snapshotChainStream', { start: 1, stop: 2 })
@@ -37,12 +38,17 @@ describe('Route chain/snapshotChainStream', () => {
 
     const serializedBlock = strategy.blockSerde.serialize(blockA1)
     const bw = bufio.write(getBlockSize(serializedBlock))
-    const blockBuffer = writeBlock(bw, serializedBlock).render()
+    const buffer = writeBlock(bw, serializedBlock).render()
     expect(value).toMatchObject({
       value: {
-        blockBuffer,
+        buffer,
         seq: 2,
       },
     })
+
+    const reader = bufio.read(buffer, true)
+    const block = readBlock(reader)
+    const transaction = strategy.transactionSerde.deserialize(block.transactions[0])
+    expect(transaction).toMatchObject(blockA1.transactions[0])
   })
 })
